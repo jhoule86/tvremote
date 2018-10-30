@@ -217,6 +217,19 @@ public interface Button<T> {
             return NAME.ENTER.toString();
         }
     }
+    
+    public abstract class ExitButton<T> implements Button<T> {
+
+        @Override
+        public String getName() {
+            return NAME.EXIT.toString();
+        }
+
+        @Override
+        public String getLabel() {
+            return NAME.EXIT.toString();
+        }
+    }
 
 
     public abstract class KeypadButton<T> implements Button<T>
