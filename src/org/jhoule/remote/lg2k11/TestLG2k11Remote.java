@@ -57,5 +57,11 @@ public class TestLG2k11Remote {
         // static block will actually test. If we get here, TV is on.
         System.out.println("TV is on");
     }
+    
+    @Test
+    public void testExit()
+    {
+        mRemote.pressExit();
+    }
 
 }
