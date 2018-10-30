@@ -209,6 +209,14 @@ public class LG2k11Button {
             return 65;
         }
     }
+    
+    public static class LGExitButton extends ExitButton<Integer>
+    {
+        @Override
+        public Integer getVirtualValue() {
+            return 91;
+        }
+    }
 
     /* ----------------- End Navigation ----------------------------------------*/
 
