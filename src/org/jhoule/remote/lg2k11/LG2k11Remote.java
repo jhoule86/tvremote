@@ -1,7 +1,6 @@
 package org.jhoule.remote.lg2k11;
 
 import org.jhoule.remote.Button;
-import org.jhoule.remote.Remote;
 import org.jhoule.remote.RemoteImpl;
 import org.jhoule.remote.lg2k11.LG2k11Button.*;
 import org.jhoule.ws.client.URLResource;
@@ -12,29 +11,40 @@ import org.jhoule.ws.client.udp.UDPResource;
 import org.jhoule.ws.client.udp.UnicastUDPClient;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Scanner;
+import java.util.Properties;
 import java.util.zip.CRC32;
 
 /**
  * Created by jhoule on 10/25/2014.
  */
-public class LG2k11Remote extends RemoteImpl implements Remote
-{
+public class LG2k11Remote extends RemoteImpl {
+    public static final String PROP_FILE_NAME = "lgRemote.properties";
 
-    public static int PORT_HTTP = 8080;
-    public static int PORT_UDP = 7070;
+    static final int PORT_HTTP = 8080;
+    static final int PORT_UDP = 7070;
+
+    public static class SETTING {
+        public static final String HOST = "host";
+        public static final String CODE = "code";
+        public static final String SHOW_CODE = "showCode";
+    }
 
     /**
-     * Client used to talk to TV's "HDCP" web interface
-     * which mostly provides auth details.
+     * Client used to talk to TV's "HDCP" web interface which mostly provides auth
+     * details.
      *
-     * TODO: implement HTTP server in order to listen to TV's mode change announcements!
+     * TODO: implement HTTP server in order to listen to TV's mode change
+     * announcements!
      *
      */
     HTTPClient mHTTPClient;
@@ -42,6 +52,7 @@ public class LG2k11Remote extends RemoteImpl implements Remote
 
     final String mTVAddress;
     final String mAuthKey;
+    final boolean mShowCode;
     int mSessionID = -1;
 
     static {
@@ -87,32 +98,46 @@ public class LG2k11Remote extends RemoteImpl implements Remote
 
         // add the keypad to the full collection of numbers
         mButtons.putAll(mKeypad);
+
+        mButtons.put(new LGExitButton());
     }
 
-    public LG2k11Remote(String aTVAddress, String aAuthKey) {
+    protected LG2k11Remote(String aTVAddress, String aAuthKey, boolean aShowCode) throws Exception {
         mTVAddress = aTVAddress;
         mAuthKey = aAuthKey;
+        mShowCode = aShowCode;
+
+        if (mTVAddress == null || mTVAddress.length() < 1) {
+            throw new Exception("TV adddress not specified");
+        }
+
+        InetAddress addr = null;
+
+        try {
+            addr = InetAddress.getByName(mTVAddress);
+
+        } catch (Exception t) {
+            throw new RuntimeException(mTVAddress + " is not a valid IPv4 address");
+        }
+
+        if (!(addr instanceof Inet4Address && addr.getHostAddress().equals(mTVAddress))) {
+            throw new Exception("address not resolvable to IP address");
+        }
 
         mHTTPClient = new NativeHTTPClient();
         mUDPSender = new UnicastUDPClient();
-
-        try {
-
-            if (mTVAddress == null || mTVAddress.length() < 1) {
-                throw new Exception("adddress not specified");
-            }
-
-            final InetAddress addr = InetAddress.getByName(mTVAddress);
-            if (!(addr instanceof Inet4Address && addr.getHostAddress().equals(mTVAddress))) {
-                throw new Exception("address not resolvable to IP address");
-            }
-
-        } catch (Exception t) {
-            throw new RuntimeException(mTVAddress + "is not a valid IPv4 address");
-        }
     }
 
-    boolean isTVAvailable() {
+    protected LG2k11Remote(Properties settings) throws Exception {
+        this(settings.getProperty(SETTING.HOST), settings.getProperty(SETTING.CODE),
+                Boolean.parseBoolean(settings.getProperty(SETTING.SHOW_CODE)));
+    }
+
+    public LG2k11Remote() throws Exception {
+        this(loadSettingsFromFile(null));
+    }
+
+    public boolean isDeviceAvailable() {
         int response;
         try {
             mHTTPClient.setResource(createResourceForVersionInfo());
@@ -140,9 +165,6 @@ public class LG2k11Remote extends RemoteImpl implements Remote
             mHTTPClient.setResource(createResourceForConfirmingAuth());
             mHTTPClient.open();
             response = mHTTPClient.doRequest(HTTPClient.METHOD.GET, null);
-
-            System.err.println(new String(mHTTPClient.getLastResponsePayload()));
-
         } catch (Exception e) {
             return false;
         } finally {
@@ -151,76 +173,61 @@ public class LG2k11Remote extends RemoteImpl implements Remote
         return (response == 200);
     }
 
-    int establishSession() {
-        byte[] payload = ("<?xml version=\"1.0\" encoding=\"utf-8\"?><auth><type>AuthReq</type><value>" + mAuthKey + "</value></auth>").getBytes();
-        Map<String, String> headers = new HashMap<String, String>();
-        headers.put("Content-Type", "application/atom+xml");
-        int response = -1;
-
-        // have to ask for code every time... because TV is dumb?
-        try {
-            mHTTPClient.setResource(createResourceForAuthDisplay());
-            mHTTPClient.open();
-            response = mHTTPClient.doRequest(HTTPClient.METHOD.POST, payload, headers);
-
-        } catch (Exception e) {
-            return -1;
-        } finally {
-            mHTTPClient.close();
-        }
-
-        if (response != 200) {
-            throw new RuntimeException("HTTP call failed for displaying pairing key: " + mHTTPClient.getLastError());
-        }
+    int establishSession() throws Exception {
 
         try {
-            mHTTPClient.setResource(createResourceForAuthKey());
-            mHTTPClient.open();
-            response = mHTTPClient.doRequest(HTTPClient.METHOD.POST, payload, headers);
+            byte[] payload = ("<?xml version=\"1.0\" encoding=\"utf-8\"?><auth><type>AuthReq</type><value>" + mAuthKey
+                    + "</value></auth>").getBytes();
+            Map<String, String> headers = new HashMap<String, String>();
+            headers.put("Content-Type", "application/atom+xml");
+            int response = -1;
 
+            try {
+                mHTTPClient.setResource(createResourceForAuthKey());
+                mHTTPClient.open();
+                response = mHTTPClient.doRequest(HTTPClient.METHOD.POST, payload, headers);
+            } finally {
+                mHTTPClient.close();
+            }
+
+            if (response != 200) {
+                throw new Exception("HTTP call failed for auth: " + mHTTPClient.getLastError());
+            }
+
+            byte[] answerBytes = mHTTPClient.getLastResponsePayload();
+            if (answerBytes == null || answerBytes.length < 1) {
+                throw new Exception("HTTP call failed for auth: no data");
+            }
+
+            String answer = new String(answerBytes);
+            // <?xml version="1.0"
+            // encoding="utf-8"?><envelope><HDCPError>200</HDCPError><HDCPErrorDetail>OK</HDCPErrorDetail><session>114859659</session></envelope>
+
+            final String sessionTag = "<session>";
+            final String sessionEnd = "</session>";
+
+            int start = answer.indexOf(sessionTag) + sessionTag.length();
+            int end = answer.indexOf(sessionEnd, start);
+
+            if (start < 0 || start > answer.length() - 1 || end < 0 || end > answer.length() - 1) {
+                throw new Exception("HTTP call failed for auth: \"session\" element is missing");
+            }
+
+            mSessionID = Integer.parseInt(answer.substring(start, end));
+
+            // confirm that we got the code
+            if (!confirmSession()) {
+                mSessionID = -1;
+                throw new RuntimeException("HTTP confirmation call failed!");
+            }
+
+            mUDPSender.setResource(createResourceForUDP());
+
+            return mSessionID;
         } catch (Exception e) {
-            return -1;
-        } finally {
-            mHTTPClient.close();
-        }
-
-        if (response != 200) {
-            throw new RuntimeException("HTTP call failed for auth: " + mHTTPClient.getLastError());
-        }
-
-        byte[] answerBytes = mHTTPClient.getLastResponsePayload();
-        if (answerBytes == null || answerBytes.length < 1) {
-            throw new RuntimeException("HTTP call failed for auth: no data");
-        }
-
-        String answer = new String(answerBytes);
-        // <?xml version="1.0" encoding="utf-8"?><envelope><HDCPError>200</HDCPError><HDCPErrorDetail>OK</HDCPErrorDetail><session>114859659</session></envelope>
-
-        final String sessionTag = "<session>";
-        final String sessionEnd = "</session>";
-
-        int start = answer.indexOf(sessionTag) + sessionTag.length();
-        int end = answer.indexOf(sessionEnd, start);
-
-        if (start < 0 || start > answer.length() - 1 || end < 0 || end > answer.length() - 1) {
-            throw new RuntimeException("HTTP call failed for auth: \"session\" element is missing");
-        }
-
-        mSessionID = Integer.parseInt(answer.substring(start, end));
-
-        // confirm that we got the code
-        if (!confirmSession()) {
             mSessionID = -1;
-            throw new RuntimeException("HTTP confirmation call failed!");
+            throw e;
         }
-
-        mUDPSender.setResource(createResourceForUDP());
-
-        return mSessionID;
-    }
-
-    boolean hasSessionID() {
-        return mSessionID > 0;
     }
 
     protected URLResource createResourceForVersionInfo() {
@@ -234,13 +241,7 @@ public class LG2k11Remote extends RemoteImpl implements Remote
     }
 
     protected URLResource createResourceForAuthDisplay() {
-        final String resourcePath = "/hdcp/api/auth";
-        try {
-            URL url = new URL(getHTTPURL().toString() + resourcePath);
-            return new URLResource(url);
-        } catch (Exception e) {
-            return null;
-        }
+        return createResourceForAuthKey();
     }
 
     protected URLResource createResourceForAuthKey() {
@@ -285,8 +286,7 @@ public class LG2k11Remote extends RemoteImpl implements Remote
         }
 
         Object o = aButton.getVirtualValue();
-        if (! (o instanceof Integer))
-        {
+        if (!(o instanceof Integer)) {
             throw new IllegalArgumentException("This remote only accepts Integer Buttons");
         }
 
@@ -298,9 +298,14 @@ public class LG2k11Remote extends RemoteImpl implements Remote
     protected void pressButton(Integer aButtonNumber) {
         final int cmd = 1;
 
-        if (aButtonNumber == null)
-        {
+        if (aButtonNumber == null) {
             throw new IllegalArgumentException("Unable to press NULL button");
+        }
+
+        try {
+            establishSession();
+        } catch (Exception e) {
+            throw new RuntimeException("Unable to establish session", e);
         }
 
         byte[] argBytes = ByteBuffer.allocate(4).putInt(aButtonNumber).array();
@@ -346,30 +351,23 @@ public class LG2k11Remote extends RemoteImpl implements Remote
         reverseBA(lenData);
 
         /*
-        Bytes	Content
-        0-3	CRC32 checksum of the whole message (bytes 0-3, i.e. this bytes, are set to "0x00" for the CRC32 calculation)
-        4-7	Session ID
-        8-9	Command 1
-        10-13	Length of following array
-        14-21	data array (fist four bytes, i.e. 14-17 might be Command 2)
-
-        ! !
-
-        Command 1	Name	                Parameters
-        -----------------------------------------------
-        1	        key input	            1x 4 bytes
-        2	        touch move	            2x 4 bytes
-        3	        touch click	            1x 4 bytes
-        5	        set favorite channel	2x 4 bytes
-        7	        channel change	        2x 4 bytes
-        9	        text input	            Command 2 = 1, String
-
+         * Bytes Content 0-3 CRC32 checksum of the whole message (bytes 0-3, i.e. this
+         * bytes, are set to "0x00" for the CRC32 calculation) 4-7 Session ID 8-9
+         * Command 1 10-13 Length of following array 14-21 data array (fist four bytes,
+         * i.e. 14-17 might be Command 2)
+         * 
+         * ! !
+         * 
+         * Command 1 Name Parameters ----------------------------------------------- 1
+         * key input 1x 4 bytes 2 touch move 2x 4 bytes 3 touch click 1x 4 bytes 5 set
+         * favorite channel 2x 4 bytes 7 channel change 2x 4 bytes 9 text input Command
+         * 2 = 1, String
+         * 
          */
 
         try {
             ByteArrayOutputStream preHash = new ByteArrayOutputStream();
             ByteArrayOutputStream noHash = new ByteArrayOutputStream();
-
 
             noHash.write(sessionBytes);
             noHash.write(cmd);
@@ -394,7 +392,7 @@ public class LG2k11Remote extends RemoteImpl implements Remote
 
             toSend = postHash.toByteArray();
 
-            System.out.println("Sending command: " + bytesToHex(toSend));
+            // System.out.println("Sending command: " + bytesToHex(toSend));
 
             mUDPSender.open();
             mUDPSender.sendBytes(toSend);
@@ -418,54 +416,79 @@ public class LG2k11Remote extends RemoteImpl implements Remote
         return builder.toString();
     }
 
-    public static void main(String [] args)
-    {
+    protected static Properties loadSettingsFromFile(String path) {
 
-        final String quit = "REMOTE_OFF";
-
-        LG2k11Remote rem = new MyLGRemote();
-
-        boolean on = rem.isTVAvailable();
-        if (!on)
-        {
-            throw new RuntimeException("TV is not on");
+        if (path == null || path.length() == 0) {
+            path = PROP_FILE_NAME;
         }
 
-        Scanner s = new Scanner(System.in);
+        InputStream is = null;
+        Properties settings = new Properties();
+        try {
+            File f = new File(path);
+            System.out.println("Loading settings from " + f.getAbsolutePath());
+            is = new FileInputStream(f);
 
-        boolean running = true;
-        boolean haveSession = false;
-
-        while (running) {
-            if (!rem.isTVAvailable())
-            {
-                // invalidate session
-                haveSession = false;
-
-                System.out.println("TV is not on.");
-                break;
-            }
-
-            if (! haveSession)
-            {
+            settings.load(is);
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            if (is != null) {
                 try {
-                    rem.establishSession();
-                } catch (Exception e) {
-                    throw new RuntimeException("Unable to establish session", e);
+                    is.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
             }
+        }
 
-            System.out.println("button name?");
-            String name = s.nextLine();
-            System.out.println();
+        return settings;
+    }
 
-            if (name.equalsIgnoreCase(quit))
-            {
-                running = false;
-                break;
-            }
+    @Override
+    public boolean shutDown() {
+        mSessionID = -1;
 
-            rem.pressButton(name);
+        return true;
+    }
+
+    public void showAuthCode() {
+        byte[] payload = ("<?xml version=\"1.0\" encoding=\"utf-8\"?><auth><type>AuthKeyReq</type><value>" + mAuthKey
+                + "</value></auth>").getBytes();
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("Content-Type", "application/atom+xml");
+        int response = -1;
+
+        // have to ask for code every time... because TV is dumb?
+        try {
+            mHTTPClient.setResource(createResourceForAuthDisplay());
+            mHTTPClient.open();
+            response = mHTTPClient.doRequest(HTTPClient.METHOD.POST, payload, headers);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            mHTTPClient.close();
+        }
+
+        if (response != 200) {
+            throw new RuntimeException("HTTP call failed for displaying pairing key: " + mHTTPClient.getLastError());
+        }
+    }
+
+    @Override
+    public boolean setup() {
+        boolean hasCode = mAuthKey != null && mAuthKey.trim().length() > 0;
+        if (!hasCode || mShowCode) {
+            showAuthCode();
+            return (hasCode);
+        }
+
+        try {
+            return establishSession() > 0;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
         }
     }
 }
