@@ -4,7 +4,7 @@ import java.util.Scanner;
 
 import org.jhoule.remote.lg2k11.LG2k11Remote;
 
-public class RemoteCLI {
+public class RemoteCli {
 
     static final String COMMAND_QUIT = "!q";
 
