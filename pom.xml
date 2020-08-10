@@ -3,9 +3,11 @@
  <groupId>org.jhoule.remote</groupId>
  <artifactId>lg2k11</artifactId>
  <version>1.0.0</version>
+ <packaging>jar</packaging>
  <properties>
     <maven.compiler.source>1.8</maven.compiler.source>
     <maven.compiler.target>1.8</maven.compiler.target>
+    <maven.test.skip>true</maven.test.skip>
  </properties>
  <dependencies>
     <dependency>
