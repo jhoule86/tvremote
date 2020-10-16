@@ -100,6 +100,10 @@ public class LG2k11Remote extends RemoteImpl {
         mButtons.putAll(mKeypad);
 
         mButtons.put(new LGExitButton());
+
+        mButtons.put(new LGPauseButton());
+
+        mButtons.put(new LGPlayButton());
     }
 
     protected LG2k11Remote(String aTVAddress, String aAuthKey, boolean aShowCode) throws Exception {
@@ -355,14 +359,14 @@ public class LG2k11Remote extends RemoteImpl {
          * bytes, are set to "0x00" for the CRC32 calculation) 4-7 Session ID 8-9
          * Command 1 10-13 Length of following array 14-21 data array (fist four bytes,
          * i.e. 14-17 might be Command 2)
-         * 
+         *
          * ! !
-         * 
+         *
          * Command 1 Name Parameters ----------------------------------------------- 1
          * key input 1x 4 bytes 2 touch move 2x 4 bytes 3 touch click 1x 4 bytes 5 set
          * favorite channel 2x 4 bytes 7 channel change 2x 4 bytes 9 text input Command
          * 2 = 1, String
-         * 
+         *
          */
 
         try {
@@ -481,7 +485,7 @@ public class LG2k11Remote extends RemoteImpl {
         boolean hasCode = mAuthKey != null && mAuthKey.trim().length() > 0;
         if (!hasCode || mShowCode) {
             showAuthCode();
-            return (hasCode);
+            return false;
         }
 
         try {

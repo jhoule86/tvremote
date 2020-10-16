@@ -209,7 +209,7 @@ public class LG2k11Button {
             return 65;
         }
     }
-    
+
     public static class LGExitButton extends ExitButton<Integer>
     {
         @Override
@@ -258,6 +258,48 @@ public class LG2k11Button {
     /* ----------------- END keypad ------------------------------------------*/
 
     /* ----------------- Media Control ------------------------------------------------*/
+
+    /**
+     * Implements Play button
+     */
+    public static class LGPlayButton implements Button<Integer>
+    {
+        @Override
+        public String getName() {
+            return "PLAY";
+        }
+
+        @Override
+        public String getLabel() {
+            return "Play";
+        }
+
+        @Override
+        public Integer getVirtualValue() {
+            return 176;
+        }
+    }
+
+     /**
+     * Implements Play button
+     */
+    public static class LGPauseButton implements Button<Integer>
+    {
+        @Override
+        public String getName() {
+            return "PAUSE";
+        }
+
+        @Override
+        public String getLabel() {
+            return "Pause";
+        }
+
+        @Override
+        public Integer getVirtualValue() {
+            return 186;
+        }
+    }
 
     /**
      * Implements Stop button
